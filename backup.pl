@@ -275,7 +275,7 @@ sub BackupFilesystem($$) {
 
   # if remote backup, make sure host is up
   if( defined($host) && !PingHost($host) ) {
-    LogError("$host is down, skipping backup of $filesystem");
+    LogError("$host is down, skipping level $level backup of $filesystem");
     # last backup time is not updated
     return 0;
   }

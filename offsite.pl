@@ -463,14 +463,16 @@ images, but this program does not attempt to create the images.
 
 Almost all options can be specified both on the command line and in the
 configuration file. When an option is specified in both places, the value
-supplied on the command line is used.
+supplied on the command line is used. The configuration file is described
+in the L<"CONFIGURATION FILE"> section.
 
 =over
 
 =item B<--config I<f>>
 
 Read configuration from file I<f>. If not specified, configuration is read
-from F</etc/backup/backup.conf>.
+from F</etc/backup/backup.conf>. The configuration file is described
+in the L<"CONFIGURATION FILE"> section.
 
 =item B<--nosyslog>
 
@@ -546,6 +548,25 @@ Print a usage summary and exit.
 =item B<--man>
 
 Read the full man page for this program.
+
+=back
+
+=head1 CONFIGURATION FILE
+
+Options are specified in the configuration in lines that look like:
+
+=over
+
+I<option>=I<value>
+
+=back
+
+You may add any amount of whitespace on either side of the C<=>, so the
+following will also work:
+
+=over
+
+I<option> = I<value>
 
 =back
 

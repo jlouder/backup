@@ -5,11 +5,11 @@
 use strict;
 use Sys::Syslog qw(:DEFAULT setlogsock);
 use Getopt::Long;
+use Pod::Usage;
 use POSIX qw(strftime);
 use File::Temp qw(tempfile);
 
 # function prototypes
-sub PrintUsage();
 sub LogMessage;
 sub LogDebug;
 sub LogInfo;
@@ -18,7 +18,6 @@ sub LogError;
 sub LogFatalAndExit;
 sub InitializeLogging();
 sub ReadConfigFile($);
-sub PrintUsageAndExit();
 sub CheckMandatoryOptions();
 sub ProcessCommandLine();
 sub Filename($);
@@ -54,12 +53,6 @@ END {
   if( $logging_initialized ) {
     closelog();
   }
-}
-
-sub PrintUsage() {
-  print << "__EOF__";
-USAGE: $0 [ --config <cfgfile> ] [ --all ] <filesystem> [ <filesystem> .. ]
-__EOF__
 }
 
 sub LogMessage {
@@ -131,11 +124,6 @@ sub ReadConfigFile($) {
   close CONFIG;
 }
 
-sub PrintUsageAndExit() {
-  PrintUsage();
-  exit 2;
-}
-
 sub CheckMandatoryOptions() {
   my $key;
   foreach $key (@mandatory_opts) {
@@ -146,16 +134,26 @@ sub CheckMandatoryOptions() {
 }
 
 sub ProcessCommandLine() {
+  my ($help, $man);
+
   my $result = GetOptions('config=s' => \$opt{ConfigFile},
                           'level=i' => \$opt{LevelFromCmdline},
-                          'fs=s' => \@filesystems);
+                          'fs=s' => \@filesystems,
+                          'help' => \$help,
+                          'man' => \$man);
+
+  if( $help ) {
+    pod2usage(-verbose => 0, -exitval => 0);
+  }
+  if( $man ) {
+    pod2usage(-verbose => 2, -exitval => 1);
+  }
+  if( !$result ) {
+    pod2usage(-verbose => 0, -exitval => 1);
+  }
 
   # in case some 'fs' args were comma-separated lists
   @filesystems = split(/,/, join(',', @filesystems));
-
-  if( !$result ) {
-    PrintUsageAndExit();
-  }
 }
 
 # SUBROUTINE:  Filename($filesystem)
@@ -395,3 +393,157 @@ if( $failures ) {
 } else {
   exit 0;
 }
+
+__END__
+
+=head1 NAME
+
+backup - backs up local and/or remote data to disk
+
+=head1 SYNOPSIS
+
+backup [options]
+
+ Options:
+   --config <f>		read configuration from <f>
+   --all		backup all filesystems in configuration file
+   --level <l>		perform a level <l> backup
+   --fs <f>		a directory to back up, or host:directory
+   --help		print a usage summary
+   --man		read the full man page
+
+=head1 DESCRIPTION
+
+The B<backup> program uses GNU B<tar>, B<bzip2>, and B<ssh> to back up
+local and remote directory structures to disk. Any number of levels of
+backups are supported, with level I<0> being a full backup and
+level I<n> (where I<n> > 0) being an incremental backup of all the changes
+since the last level I<n-1> backup.
+
+Old backups are not automatically deleted, so you must manage backup retention
+separately by deleting old backup files.
+
+=head1 OPTIONS
+
+The following options may be specified on the command line. Some of these
+options may also be specified in the configuration file. When an option is
+specified in both places, the value from the command line is used. The
+configuration file is described in the L<"CONFIGURATION FILE"> section.
+
+=over
+
+=item B<--config I<f>>
+
+Read configuration from file I<f>. If not specified, configuration is read
+from F</etc/backup/backup.conf>. The configuration file is described
+in the L<"CONFIGURATION FILE"> section.
+
+=item B<--all>
+
+Back up all filesystems listed in the configuration file. If this option is
+given, no filesystems need to be explicitly listed on the command line with
+the C<--fs> option, and all filesystems listed with the C<Filesystems>
+option in the configuration file will be backed up.
+
+=item B<--level I<l>>
+
+Specifies that a level I<l> backup will be performed on the filesystems. The
+level may be any integer >= 0.
+
+The corresponding configuration file option is C<Level>.
+
+=item B<--fs I<f>>
+
+Specifies one or more filesystems to back up. Each filesystem may by either
+a local directory, or a remote directory of the form I<host:directory>. To
+back up multiple filesystems, the C<--fs> option may be given multiple times,
+or multiple filesystems may be given as one argument in a comma-separated
+list. For example, the following are all valid ways to specify that three
+filesystems should be backed up:
+
+	--fs / --fs host1:/var --fs host2:/etc
+	--fs /,host1:/var,host2:/etc
+	--fs / --fs host1:/var,host2:/etc
+
+=item B<--help>
+
+Print a usage summary and exit.
+
+=item B<--man >
+
+Read the full man page for this program.
+
+=back
+
+=head1 CONFIGURATION FILE
+
+Options are specified in the configuration in lines that look like:
+
+=over
+
+I<option>=I<value>
+
+=back
+
+You may add any amount of whitespace on either side of the C<=>, so the
+following will also work:
+
+=over
+
+I<option> = I<value>
+
+=back
+
+The following options may be specified in the configuration file:
+
+=over
+
+=item B<Filesystems>
+
+Specifies the filesystems to back up. Each filesystem may be either a local
+directory or a remote directory of the form I<host:directory>. To specify
+multiple directories, use a comma-separated list.
+
+=item B<Level>
+
+Specifies that a level I<l> backup will be performed on the filesystems. The
+level may be any integer >= 0.
+
+=item B<BackupDirectory>
+
+The directory to which the completed backups will be written.
+
+=item B<StateDirectory>
+
+The directory in which to keep data about when the last backup was performed
+for each filesystem.
+
+=item B<SyslogFacility>
+
+Logging is done via syslog. The option specifies the syslog facility to use
+when logging.
+
+=item B<SshIdentityFile>
+
+The SSH identity to use when running commands on remote systems. This identity
+should not have a passphrase. A good way to test that the identity will work is
+to run:
+
+=over
+
+ssh -i I<IdentityFile> -o Batchmode=yes root@I<host>
+
+=back
+
+=item B<ExcludeFile>
+
+A file listing pathnames to exclude from backups. The pathnames are relative
+to the directory being backed up. For example, to exclude the C</tmp>
+directory when backing up C</>, specify a pathname of C<tmp> in the exclude
+file.
+
+This file must also exist on remote systems in this location.
+
+=back
+
+=cut

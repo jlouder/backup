@@ -247,7 +247,8 @@ sub CurrentTimeAsTimestamp() {
 sub PingHost($) {
   my $host = $_[0];
 
-  my $rc = system("ping $host -c 1 -w 1 > /dev/null 2>&1") / 256;
+  my $rc = system('ssh -o BatchMode=yes -i ' . $opt{SshIdentityFile}
+                  . " $host uptime > /dev/null 2>&1") / 256;
 
   if( $rc == 0 ) {
     return 1;

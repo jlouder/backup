@@ -132,9 +132,7 @@ sub ReadConfigFile($) {
 }
 
 sub PrintUsageAndExit() {
-  print << "__EOF__";
-USAGE: backup.pl [options]
-__EOF__
+  PrintUsage();
   exit 2;
 }
 

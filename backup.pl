@@ -6,7 +6,7 @@ use strict;
 use Sys::Syslog qw(:DEFAULT setlogsock);
 use Getopt::Long;
 use Pod::Usage;
-use POSIX qw(strftime);
+use POSIX qw(strftime mktime);
 use File::Temp qw(tempfile);
 
 # function prototypes
@@ -32,6 +32,7 @@ my $basename = $0; $basename =~ s:^.*/::;
 
 # some defaults for options in the config file
 my %opt;
+$opt{'UseSyslog'} = 1;
 $opt{'ConfigFile'} = '/etc/backup/backup.conf';
 $opt{'SshIdentityFile'} = '/etc/backup/identity';
 $opt{'ExcludeFile'} = '/etc/backup/exclude';
@@ -60,7 +61,7 @@ sub LogMessage {
   my $format = $_[0]; shift;
   my @args = @_;
 
-  if( $logging_initialized ) {
+  if( $logging_initialized && $opt{'UseSyslog'} ) {
     syslog($priority, $format, @args);
   } else {
     $format = "[$priority] $format";
@@ -136,7 +137,8 @@ sub CheckMandatoryOptions() {
 sub ProcessCommandLine() {
   my ($help, $man);
 
-  my $result = GetOptions('config=s' => \$opt{ConfigFile},
+  my $result = GetOptions('syslog!' => \$opt{'UseSyslog'},
+                          'config=s' => \$opt{ConfigFile},
                           'level=i' => \$opt{LevelFromCmdline},
                           'fs=s' => \@filesystems,
                           'help' => \$help,
@@ -267,6 +269,37 @@ sub BackupFilesystem($$) {
     ($host, $dir) = split /:/, $filesystem, 2;
   } else {
     $dir = $filesystem;
+  }
+
+  # if Level0Frequency is set, see if we must force a level 0 instead
+  if( $level > 0 && defined($opt{'Level0Frequency'}) ) {
+    # get time of last level 0
+    my $lastlevel0 = GetLastBackupTime($filesystem, 0);
+    # parse time from MM/DD/YYYY HH:MM:SS into time_t for comparison with now
+    my $lastlevel0_secs;
+    if( defined($lastlevel0) ) {
+      if( $lastlevel0 =~ m,^(\d+)/(\d+)/(\d+)\s+(\d+):(\d+):(\d+), ) {
+        my ($mon, $mday, $year, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+        $lastlevel0_secs = mktime($sec, $min, $hour, $mday, $mon-1, $year-1900);
+      }
+    }
+
+    my $forcelevel0 = 0;
+    if( defined($lastlevel0_secs) ) {
+      my $now_secs = time();
+      if( ($now_secs - $lastlevel0_secs) / 86400 > $opt{'Level0Frequency'} ) {
+        $forcelevel0 = 1;
+      }
+    } else {
+      # last level 0 was never, or we can't parse the timestamp, so force one
+      $forcelevel0 = 1;
+    }
+
+    if( $forcelevel0 ) {
+      LogWarning("forcing level 0 backup because last level 0 of " .
+                 "$filesystem was >= " . $opt{'Level0Frequency'} . " days ago");
+      $level = 0;
+    }
   }
 
   # if remote backup, make sure host is up
@@ -406,6 +439,7 @@ backup [options]
 
  Options:
    --config <f>		read configuration from <f>
+   --nosyslog		log to stdout instead of syslog
    --all		backup all filesystems in configuration file
    --level <l>		perform a level <l> backup
    --fs <f>		a directory to back up, or host:directory
@@ -437,6 +471,10 @@ configuration file is described in the L<"CONFIGURATION FILE"> section.
 Read configuration from file I<f>. If not specified, configuration is read
 from F</etc/backup/backup.conf>. The configuration file is described
 in the L<"CONFIGURATION FILE"> section.
+
+=item B<--nosyslog>
+
+Log to stdout instead of syslog.
 
 =item B<--all>
 
@@ -508,6 +546,16 @@ multiple directories, use a comma-separated list.
 
 Specifies that a level I<l> backup will be performed on the filesystems. The
 level may be any integer >= 0.
+
+=item B<Level0Frequency>
+
+Specifies the maximum number of days between level 0 backups. If a level 1
+or greater backup is requested but the last level 0 backup is this number of
+days old or older, a level 0 backup will be run instead. If you make level 0
+backups with a regular frequency, this option is useful to enforce that
+frequency.
+
+By default, this option is not set, and a level 0 backup will never be forced.
 
 =item B<BackupDirectory>
 

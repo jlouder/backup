@@ -241,6 +241,21 @@ sub CurrentTimeAsTimestamp() {
   return strftime("%Y%m%d%H%M%S", $sec, $min, $hour, $mday, $mon, $year);
 }
 
+# SUBROUTINE:  PingHost($host)
+# DESCRIPTION: Checks to see if $host is up
+# RETURNS:     1 if $host is up, 0 otherwise
+sub PingHost($) {
+  my $host = $_[0];
+
+  my $rc = system("ping $host -c 1 -w 1 > /dev/null 2>&1") / 256;
+
+  if( $rc == 0 ) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 # SUBROUTINE:  BackupFilesystem($filesystem, $level)
 sub BackupFilesystem($$) {
   my ($filesystem, $level) = @_;
@@ -255,6 +270,13 @@ sub BackupFilesystem($$) {
     ($host, $dir) = split /:/, $filesystem, 2;
   } else {
     $dir = $filesystem;
+  }
+
+  # if remote backup, make sure host is up
+  if( defined($host) && !PingHost($host) ) {
+    LogError("$host is down, skipping backup of $filesystem");
+    # last backup time is not updated
+    return 0;
   }
 
   # calculate the reference time for changed files

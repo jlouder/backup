@@ -26,6 +26,7 @@ sub UpdateLastBackupTime($$$);
 sub CurrentTimeAsTimestamp();
 sub BackupFilesystem($$);
 sub RunIt($);
+sub CreateLockFile();
 
 # get the basename of this program
 my $basename = $0; $basename =~ s:^.*/::;
@@ -49,10 +50,17 @@ my @filesystems = ();
 # is logging initialized yet?
 my $logging_initialized = 0;
 
+# should the lockfile be removed?
+my $remove_lockfile = 0;
+
 # run this at exit
 END {
   if( $logging_initialized ) {
     closelog();
+  }
+
+  if( $opt{'LockFile'} && $remove_lockfile ) {
+    unlink($opt{'LockFile'});
   }
 }
 
@@ -400,12 +408,34 @@ sub RunIt($) {
   }
 }
 
+# SUBROUTINE:  CreateLockFile()
+# DESCRIPTION: If $opt{LockFile} is defined, creates that file if it doesn't
+#              exist, or exits with a failure message if it does exist.
+sub CreateLockFile() {
+  # do nothing if no lockfile is defined
+  return if( !$opt{'LockFile'} );
+
+  if( -f $opt{'LockFile'} ) {
+    LogFatalAndExit("another backup in progress, $opt{LockFile} exists");
+  }
+
+  # try to create the lockfile
+  if( !open(LOCKFILE, ">$opt{LockFile}") ) {
+    LogFatalAndExit("can't create lock file $opt{LockFile}: $!");
+  }
+  close(LOCKFILE);
+
+  # remove the lockfile at exit
+  $remove_lockfile = 1;
+}
+
 
 # main()
 ProcessCommandLine();
 ReadConfigFile($opt{ConfigFile});
 CheckMandatoryOptions();
 InitializeLogging();
+CreateLockFile();
 
 # make a list of filesystems to back up
 if( $#filesystems < 0 ) {

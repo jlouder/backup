@@ -8,6 +8,7 @@ use Getopt::Long;
 use Pod::Usage;
 use POSIX qw(strftime);
 use File::Temp qw(tempfile);
+use Digest::MD5;
 
 # function prototypes
 sub LogMessage;
@@ -26,6 +27,8 @@ sub NumParts($$$);
 sub Basename($);
 sub EncryptFile($$$$$);
 sub MakeFilesForImages;
+sub WriteMD5Sums($$$);
+sub MD5Sum($);
 
 # get the basename of this program
 my $basename = $0; $basename =~ s:^.*/::;
@@ -316,6 +319,9 @@ sub MakeFilesForImages {
   my $file;
   my $image_num = 0;
   my $remaining = 0;
+  my %input_files_this_image;
+  my %input_md5s;
+  my %output_md5s;
 
   mkdir "${work_dir}/1"
     || LogFatalAndExit("Can't create work directory ${work_dir}/1: $!");
@@ -334,6 +340,22 @@ sub MakeFilesForImages {
     while( $count <= $parts ) {
       # roll over to next image if no bytes remain for this image
       if( $remaining < $opt{'BlockSize'} ) {
+        # write MD5SUM file for image just finished (unless it's the first)
+        if( $image_num > 0 ) {
+          # remove unnecessary input file MD5s
+          foreach my $file ( keys %input_md5s ) {
+            if( !defined( $input_files_this_image{$file} ) ) {
+              delete $input_md5s{$file};
+            }
+          }
+
+          WriteMD5Sums("${work_dir}/${image_num}/MD5SUM",
+                       \%input_md5s, \%output_md5s);
+        }
+
+        # clear the hash of input files in this image, since it's a new image
+        %input_files_this_image = ();
+
         $image_num++;
         LogDebug "--- starting image $image_num";
         $remaining = $image_size;
@@ -346,7 +368,8 @@ sub MakeFilesForImages {
 
       # calculate how much of the file this part is, and how much
       # image space remains
-      if( $filesize >= (($remaining < $opt{'MaxFileSize'}) ? $remaining : $opt{'MaxFileSize'}) ) {
+      if( $filesize >= (($remaining < $opt{'MaxFileSize'}) ?
+                        $remaining : $opt{'MaxFileSize'}) ) {
         # fills up this image
         $copyblocks = int($remaining / $opt{'BlockSize'});
         if( $copyblocks > int($opt{'MaxFileSize'} / $opt{'BlockSize'}) ) {
@@ -373,6 +396,15 @@ sub MakeFilesForImages {
       EncryptFile($file, $destname, $offsetblocks, $copyblocks,
                   $opt{'PasswordFile'});
 
+      # calculate MD5 of output file
+      $output_md5s{$destname} = MD5Sum($destname);
+
+      # calculate MD5 of input file if we don't already have it
+      $input_files_this_image{$file} = 1;
+      if( !defined($input_md5s{$file}) ) {
+        $input_md5s{$file} = MD5Sum($file);
+      }
+
       # calculate offset for next part
       $offsetblocks += $copyblocks;
 
@@ -381,8 +413,58 @@ sub MakeFilesForImages {
     }
   }
 
+  # write MD5 sums for final image
+  WriteMD5Sums("${work_dir}/${image_num}/MD5SUM",
+               \%input_md5s, \%output_md5s);
+
   # return the number of directories created
   return $image_num;
+}
+
+# SUBROUTINE:  WriteMD5Sums($filename, \%input_files, \%output_files)
+# DESCRIPTION: Creates a file containing the MD5 sums of input and output
+#              files contained in one image. Empties the input and output
+#              file hashes when finished.
+sub WriteMD5Sums($$$) {
+  my ($filename, $inhashref, $outhashref) = @_;
+
+  if( ! open MD5SUM, ">$filename" ) {
+    LogError("Can't create $filename: $!");
+    return;
+  }
+  print MD5SUM "# input files\n";
+  foreach my $file (sort keys %$inhashref) {
+    print MD5SUM $$inhashref{$file}, '  ', Basename($file), "\n";
+  }
+  print MD5SUM "# output files\n";
+  foreach my $file (sort keys %$outhashref) {
+    print MD5SUM $$outhashref{$file}, '  ', Basename($file), "\n";
+  }
+  close MD5SUM;
+
+  # clear list of output md5s
+  %$outhashref = ();
+}
+
+# SUBROUTINE:  MD5Sum($pathname)
+# DESCRIPTION: Calculates the MD5 sum of $pathname, same as 'md5sum' command
+# RETURNS:     the MD5 hex digest, or undef on error
+sub MD5Sum($) {
+  my $pathname = $_[0];
+
+  if( !defined(open FILE, "<$pathname") ) {
+    LogError("can't open $pathname: $!");
+    return undef;
+  }
+
+  my $md5 = Digest::MD5->new();
+  LogDebug("computing MD5 sum of $pathname");
+  $md5->addfile(*FILE);
+  close FILE;
+
+  my $result = $md5->hexdigest();
+  LogInfo("MD5 sum of $pathname: $result");
+  return $result;
 }
 
 
@@ -476,7 +558,7 @@ in the L<"CONFIGURATION FILE"> section.
 
 =item B<--nosyslog>
 
-Log to stdout instead of syslog.
+Log to stdout instead of syslog. This is the default.
 
 =item B<--facility I<f>>
 

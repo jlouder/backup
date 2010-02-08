@@ -4,6 +4,7 @@
 
 use strict;
 use Sys::Syslog qw(:DEFAULT setlogsock);
+use Sys::Hostname;
 use Getopt::Long;
 use Pod::Usage;
 use POSIX qw(strftime mktime);
@@ -176,7 +177,9 @@ sub Filename($) {
   if( $filesystem =~ /:/ ) {
     ($host, $fs) = split /:/, $filesystem, 2;
   } else {
-    $host = '';
+    # it's this host; use the short hostname
+    $host = hostname;
+    $host =~ s/\..*//;
     $fs = $filesystem;
   }
 
